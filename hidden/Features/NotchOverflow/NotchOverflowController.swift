@@ -83,6 +83,13 @@ enum MenuBarExtraClassifier {
 
 class NotchOverflowController: NSObject {
 
+  // Diagnostic messages are evaluated and printed only in Debug builds.
+  private func log(_ message: @autoclosure () -> String) {
+    #if DEBUG
+    NSLog("[HiddenBar Notch] %@", message())
+    #endif
+  }
+
   // MARK: - Notch Detection
 
   private static func currentBoundary() -> NotchBoundary {
@@ -111,12 +118,21 @@ class NotchOverflowController: NSObject {
 
   /// Show overflow menu anchored to a status item (called from StatusBarController)
   func showOverflowMenuFromSeparator(near item: NSStatusItem) {
-    guard ensureAccessibility() else { return }
+    log("Richiesta apertura elenco; app=\(Bundle.main.bundleURL.path), pid=\(ProcessInfo.processInfo.processIdentifier)")
+    guard ensureAccessibility() else {
+      log("Apertura interrotta: permesso Accessibilità mancante.")
+      return
+    }
     let menu = buildOverflowMenu()
-    item.menu = menu
-    item.button?.performClick(nil)
-    DispatchQueue.main.async {
-      item.menu = nil
+    // Wait until the originating context menu has finished its action.
+    DispatchQueue.main.async { [weak self] in
+      guard let button = item.button else {
+        self?.log("Apertura interrotta: pulsante della barra assente.")
+        return
+      }
+      self?.log("Apertura menu con \(menu.items.count) righe.")
+      menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: button)
+      self?.log("Menu chiuso.")
     }
   }
 
@@ -129,6 +145,15 @@ class NotchOverflowController: NSObject {
     let allExtras = extras ?? getAllMenuBarExtras()
     let resolvedBoundary = boundary ?? Self.currentBoundary().overflowThresholdX
     let (hiddenExtras, visibleExtras) = MenuBarExtraClassifier.classify(allExtras, boundary: resolvedBoundary)
+
+    #if DEBUG
+    let excluded = allExtras.filter { $0.size.width <= 0 || $0.size.height <= 0 }
+    log("Rilevate=\(allExtras.count), nascoste=\(hiddenExtras.count), visibili=\(visibleExtras.count), escluse=\(excluded.count), sogliaX=\(resolvedBoundary)")
+    for info in excluded {
+      log("Esclusa: \(info.appName), pid=\(info.pid), posizione=\(info.position), dimensioni=\(info.size)")
+    }
+
+    #endif
 
     let menu = NSMenu()
     menu.autoenablesItems = false
@@ -214,13 +239,20 @@ class NotchOverflowController: NSObject {
 
   @objc private func activateItem(_ sender: NSMenuItem) {
     guard let info = sender.representedObject as? MenuBarExtraInfo else { return }
-    AXUIElementPerformAction(info.element, kAXPressAction as CFString)
+    // Let the overflow menu finish tracking before asking another app to open its menu.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+      self?.log("Invio AXPress dopo la chiusura dell’elenco: \(info.appName)")
+      let result = AXUIElementPerformAction(info.element, kAXPressAction as CFString)
+      self?.log("Attivazione \(info.appName), pid=\(info.pid): AXPress=\(result.rawValue) (0=successo)")
+    }
   }
 
   // MARK: - Accessibility
 
   private func ensureAccessibility() -> Bool {
-    if AXIsProcessTrusted() { return true }
+    let trusted = AXIsProcessTrusted()
+    log("Accessibilità autorizzata: \(trusted)")
+    if trusted { return true }
     let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
     AXIsProcessTrustedWithOptions(opts)
     return false
@@ -232,19 +264,23 @@ class NotchOverflowController: NSObject {
     var results: [MenuBarExtraInfo] = []
     let myPID = ProcessInfo.processInfo.processIdentifier
 
-    for app in NSWorkspace.shared.runningApplications {
+    let applications = NSWorkspace.shared.runningApplications
+    log("App in esecuzione da interrogare: \(applications.count)")
+    for app in applications {
       if app.processIdentifier == myPID { continue }
 
       let axApp = AXUIElementCreateApplication(app.processIdentifier)
       var extrasRef: AnyObject?
       let err = AXUIElementCopyAttributeValue(
         axApp, "AXExtrasMenuBar" as CFString, &extrasRef)
-      guard err == .success else { continue }
+      log("\(app.localizedName ?? "Unknown") pid=\(app.processIdentifier): AXExtrasMenuBar=\(err.rawValue)")
+      guard err == .success, let extrasRef = extrasRef else { continue }
 
       var childrenRef: AnyObject?
       let childErr = AXUIElementCopyAttributeValue(
         extrasRef as! AXUIElement,
         kAXChildrenAttribute as CFString, &childrenRef)
+      log("\(app.localizedName ?? "Unknown"): AXChildren=\(childErr.rawValue), elementi=\((childrenRef as? [AXUIElement])?.count ?? 0)")
       guard childErr == .success,
         let children = childrenRef as? [AXUIElement]
       else { continue }
@@ -254,15 +290,16 @@ class NotchOverflowController: NSObject {
         AXUIElementCopyAttributeValue(child, kAXTitleAttribute as CFString, &titleRef)
 
         var posRef: AnyObject?
-        AXUIElementCopyAttributeValue(child, kAXPositionAttribute as CFString, &posRef)
+        let posErr = AXUIElementCopyAttributeValue(child, kAXPositionAttribute as CFString, &posRef)
         var pos = CGPoint.zero
         if let pv = posRef { AXValueGetValue(pv as! AXValue, .cgPoint, &pos) }
 
         var sizeRef: AnyObject?
-        AXUIElementCopyAttributeValue(child, kAXSizeAttribute as CFString, &sizeRef)
+        let sizeErr = AXUIElementCopyAttributeValue(child, kAXSizeAttribute as CFString, &sizeRef)
         var size = CGSize.zero
         if let sv = sizeRef { AXValueGetValue(sv as! AXValue, .cgSize, &size) }
 
+        log("Icona \(app.localizedName ?? "Unknown"): posizione=\(pos) [AX=\(posErr.rawValue)], dimensioni=\(size) [AX=\(sizeErr.rawValue)]")
         results.append(MenuBarExtraInfo(
           element: child,
           appName: app.localizedName ?? "Unknown",

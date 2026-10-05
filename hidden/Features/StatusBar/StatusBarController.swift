@@ -42,6 +42,7 @@ class StatusBarController: MenuBarItemProvider {
     }
     
     private var isToggle = false
+    private var showingAllItems = false
 
     private var hoverMonitor: Any?
     private var hoverDwellTimer: Timer?
@@ -210,11 +211,27 @@ class StatusBarController: MenuBarItemProvider {
     }
     
     func showHideSeparatorsAndAlwayHideArea() {
-        Preferences.areSeparatorsHidden ? self.showSeparators() : self.hideSeparators()
-        
-        if self.isCollapsed {self.expandMenubar()}
+        if isCollapsed { expandMenubar() }
+        if Preferences.areSeparatorsHidden {
+            showSeparators()
+            showingAllItems = true
+        } else {
+            hideSeparators()
+            showingAllItems = false
+        }
+        updateToggleImage()
+        autoCollapseIfNeeded()
     }
-    
+
+    // The arrow indicates the next click: reveal more (<), or hide (>).
+    private func updateToggleImage() {
+        let canRevealMore = isCollapsed
+            || (Preferences.alwaysHiddenSectionEnabled && !showingAllItems)
+        btnExpandCollapse.button?.image = canRevealMore
+            ? Assets.expandImage
+            : Assets.collapseImage
+    }
+
     private func showSeparators() {
         Preferences.areSeparatorsHidden = false
         
@@ -236,15 +253,25 @@ class StatusBarController: MenuBarItemProvider {
     }
     
     func expandCollapseIfNeeded() {
-        //prevented rapid click cause icon show many in Dock
-        if isToggle {return}
+        guard !isToggle else { return }
         isToggle = true
-        self.isCollapsed ? self.expandMenubar() : self.collapseMenuBar()
+
+        if isCollapsed {
+            expandMenubar()
+        } else if Preferences.alwaysHiddenSectionEnabled && !showingAllItems {
+            showSeparators()
+            showingAllItems = true
+            updateToggleImage()
+            autoCollapseIfNeeded()
+        } else {
+            collapseMenuBar()
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.isToggle = false
         }
     }
-    
+
     private func collapseMenuBar() {
         guard menuBarEngine.isArrangementValid && !self.isCollapsed else {
             autoCollapseIfNeeded()
@@ -266,18 +293,16 @@ class StatusBarController: MenuBarItemProvider {
     // a permission), so show the bar as expanded, and restore the activation
     // policy in case the UI had already switched to collapsed.
     private func didFailToCollapseMenuBar() {
-        if let button = btnExpandCollapse.button {
-            button.image = Assets.collapseImage
-        }
+        updateToggleImage()
         if Preferences.useFullStatusBarOnExpandEnabled {
             NSApp.setActivationPolicy(.regular)
         }
     }
 
     private func didCollapseMenuBar() {
-        if let button = btnExpandCollapse.button {
-            button.image = Assets.expandImage
-        }
+        showingAllItems = false
+        hideSeparators()
+        updateToggleImage()
         if Preferences.useFullStatusBarOnExpandEnabled {
             NSApp.setActivationPolicy(.accessory)
             NSApp.deactivate()
@@ -286,10 +311,10 @@ class StatusBarController: MenuBarItemProvider {
 
     private func expandMenubar() {
         guard self.isCollapsed else {return}
+        showingAllItems = false
+        hideSeparators()
         menuBarEngine.expand()
-        if let button = btnExpandCollapse.button {
-            button.image = Assets.collapseImage
-        }
+        updateToggleImage()
         autoCollapseIfNeeded()
         
         if Preferences.useFullStatusBarOnExpandEnabled {
@@ -352,6 +377,7 @@ class StatusBarController: MenuBarItemProvider {
     }
 
     @objc func updateAutoHide() {
+        updateToggleImage()
         autoCollapseIfNeeded()
     }
     

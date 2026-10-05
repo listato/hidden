@@ -1,0 +1,10 @@
+/* Localizzazione italiana — versione personalizzata */
+
+"Preferences..." = "Impostazioni…";
+"Toggle Auto Collapse" = "Attiva/disattiva chiusura automatica";
+"Enable Auto Collapse" = "Attiva chiusura automatica";
+"Disable Auto Collapse" = "Disattiva chiusura automatica";
+"Quit" = "Esci";
+"Set Shortcut" = "Imposta scorciatoia";
+"Show Notch Items" = "Mostra icone dietro il notch";
+"Tutorial text" = "Configurazione della versione personalizzata:\n\n1. Attiva la sezione delle icone meno usate.\n2. Tieni premuto ⌘ e trascina il separatore aggiuntivo a sinistra del separatore principale.\n3. Metti le icone meno usate a sinistra del separatore aggiuntivo, quelle frequenti tra i due separatori e quelle sempre visibili a destra del separatore principale.\n\nClic sulla freccia:\n• Primo clic: mostra le icone frequenti.\n• Secondo clic: mostra anche le icone meno usate.\n• Terzo clic: nasconde entrambe le sezioni.\n\nSe attiva, la chiusura automatica nasconde le icone dopo il tempo impostato. La visibilità dipende dallo spazio disponibile nella barra dei menu.";
